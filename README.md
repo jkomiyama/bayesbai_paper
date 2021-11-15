@@ -18,5 +18,5 @@ For a middle-scale simulation (~ hours),
 
 A simulation yields two pdfs
 
-varK.pdf
+    varK.pdf
     varT.pdf
