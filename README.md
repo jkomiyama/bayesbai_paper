@@ -1,4 +1,4 @@
-# bayesbai_paper
+# How to run
 
 To reproduce the simulation of the paper,
 
@@ -8,5 +8,15 @@ To reproduce the simulation of the paper,
 
 For a quick simulation, 
 
+    python3 bayesbai_lb.py -m debug > debug.txt
+
+For a middle-scale simulation (~ hours), 
+
     python3 bayesbai_lb.py > default.txt
 
+## Output
+
+A simulation yields two pdfs
+
+varK.pdf
+    varT.pdf
