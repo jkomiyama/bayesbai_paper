@@ -25,7 +25,8 @@ parser.add_argument('-m', '--mode', action='store',
 parse_result = parser.parse_args()
 run_mode = parse_result.mode
 
-#run_mode = True # Test (small) run or Full run. Note that full run is very heavy (> 1 day with a decent desktop)
+# Note that full run is very heavy (> 1 day(s) with a 10-core desktop)
+# You may change full with Runnum=10K or default with Runnum=4K to obtain a reasonable result
 if run_mode == "full": #large
     # full simulation: Heavy
     Runnum = 50000
@@ -35,8 +36,8 @@ elif run_mode == "debug": # small
     Runnum = 10
     print("debug mode (lightweight)")
 else:
-    # for testing
-    Runnum = 4000
+    # default mode 
+    Runnum = 1000
     print("default mode")
 print(f"Runnum = {Runnum}")
 sys.stdout.flush()
