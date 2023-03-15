@@ -25,19 +25,17 @@ parser.add_argument('-m', '--mode', action='store',
 parse_result = parser.parse_args()
 run_mode = parse_result.mode
 
-# Note that full run is very heavy (> 1 day(s) with a 10-core desktop)
-# You may change full with Runnum=10K or default with Runnum=4K to obtain a reasonable result
 if run_mode == "full": #large
-    # full simulation: Heavy
-    Runnum = 50000
+    # full simulation: Heavy, run in 1 day on a Google Cloud c2d-highcpu-112 machine
+    Runnum = 100000
     print("full mode (heavy)")
 elif run_mode == "debug": # small
-    # for testing
+    # for testing, fast
     Runnum = 10
     print("debug mode (lightweight)")
 else:
     # default mode 
-    Runnum = 1000
+    Runnum = 10000
     print("default mode")
 print(f"Runnum = {Runnum}")
 sys.stdout.flush()
@@ -46,7 +44,6 @@ sys.stdout.flush()
 # avoiding randomness with https://joblib.readthedocs.io/en/latest/auto_examples/parallel_random_state.html
 def run_sim(sim, random_state):
     rng = np.random.RandomState(random_state)
-    #print(f"rng = {rng}")
     sim.run(rng)
     return sim
 from joblib import Parallel, delayed
@@ -56,43 +53,6 @@ class TwostagePolicy: # TSE
         self.q, self.T, self.K = q, T, K
         self.bestArmCandidates = []
         self.Kprime = -1
-    def kl(self, p, q):
-      v = 0
-      if p > 0:
-        v += p * np.log(p/q)
-      if p < 1:
-        v += (1-p) * np.log((1-p)/(1-q))
-      return v
-    def dkl(self, p, q):
-      return (q-p)/(q*(1.0-q))
-    def lb_kl(self, mu, N): # Chernoff LB
-      # q < mu such that exp(- N KL(mu, q) ) = 1/T^2
-      eps = 0.00001
-      if mu <= eps: return mu
-      l = eps
-      u = mu
-      threshold = 2. * np.log(T) / N
-      for i in range(20):
-        m = (l+u)/2.
-        if self.kl(mu, m) > threshold:
-          l = m
-        else:
-          u = m
-      return (l+u)/2
-    def ub_kl(self, mu, N): # Chernoff LB
-      # q > mu such that exp(- N KL(mu, q) ) = 1/T^2
-      eps = 0.00001
-      if mu >= 1.0-eps: return mu
-      l = mu
-      u = 1 - eps
-      threshold = 2. * np.log(T) / N
-      for i in range(20):
-        m = (l+u)/2.
-        if self.kl(mu, m) > threshold:
-          u = m
-        else:
-          l = m
-      return (l+u)/2
     def ConfBound(self):
         q, T, K = self.q, self.T, self.K
         return np.sqrt(np.log(T)/(q*T/K))
@@ -104,12 +64,9 @@ class TwostagePolicy: # TSE
                 emp_mu_list, lb_list, ub_list = np.zeros(K), np.zeros(K), np.zeros(K)
                 for i in range(K):
                     emp_mu_list[i] = S_list[i] / max(1, N_list[i])
-                    lb_list[i] = self.lb_kl(emp_mu_list[i], N_list[i])
-                    ub_list[i] = self.ub_kl(emp_mu_list[i], N_list[i])
-                #print(f"emp_mu_list = {emp_mu_list}")
-                #print(f"lb_list = {lb_list}")
-                #print(f"ub_list = {ub_list}")
-                #print(f"conf = {conf}")
+                    lb_list[i] = emp_mu_list[i] - np.sqrt(np.log(T)/max(1, N_list[i]))     
+                    ub_list[i] = emp_mu_list[i] + np.sqrt(np.log(T)/max(1, N_list[i]))     
+                    #print(f"emp_mu_list = {emp_mu_list}")
                 lb_max = np.max(lb_list)
                 self.bestArmCandidates = []
                 for i in range(K):
@@ -138,7 +95,7 @@ def get_Delta_list(mu_list):
     return Delta_list
 
 def unifTheoreticalBound(K): 
-    C = K*K/((K+1)*(K+2))
+    C = (K-1)/(K+1)
     return C
 
 class Simulation:
@@ -195,19 +152,15 @@ def main(K, T, q, weighted_prior = True):
     rss = np.random.randint(np.iinfo(np.int32).max, size=Runnum)
     n_cpus = os.cpu_count()
     sims = [Simulation(K, T, q, weighted_prior) for r in range(Runnum)] 
-    sims = Parallel(n_jobs=max(int(n_cpus * 0.8),1))( [delayed(run_sim)(sims[r], rss[r]) for r in range(Runnum)] ) #parallel computation
+    sims = Parallel(n_jobs=max(int(n_cpus - 2),1))( [delayed(run_sim)(sims[r], rss[r]) for r in range(Runnum)] ) #parallel computation
     for run in range(Runnum):
         Rt_list[run] = sims[run].Rt
         Rt_three_list[run] = sims[run].Rt_three
         Weight_list[run] = sims[run].weight
         Deltamin_list[run] = sims[run].Deltamin
-    #print(f"Rt_mean = {np.mean(Rt_list)*T}")
-    #print(f"weights = {Weight_list}")
-    #print(f"Deltamins = {Deltamin_list}")
-    #print(f"Rt_mean = {np.average(Rt_list, weights=Weight_list)}")
     Rt_mean = np.average(Rt_list, weights=Weight_list)
     Rt_three_mean = np.average(Rt_three_list, weights=Weight_list)
-    # https://www.math.arizona.edu/~tgk/mc/book_chap6.pdf (6.6) calculation of var for rejection sampling
+    # https://www.math.arizona.edu/~tgk/mc/book_chap6.pdf (6.6) calculation of var for rejection sampling (just empirical variance)
     if not weighted_prior:
         Rt_std = np.std(Rt_list) 
     else: #weighted
@@ -231,7 +184,9 @@ if do_varK:
     K_list = np.array([2, 3, 5, 10])
     for K in K_list:
         if run_mode == "full":
-            T, q = 200000*K, 0.5
+            #T, q = 200000*K, 0.5
+            T, q = 100000*K, 0.5
+            #T, q = 10000*K, 0.5
         else:
             T, q = 10000*K, 0.5
         q_coef = K/(2*(1-q) + q *K)
@@ -259,6 +214,7 @@ if do_varT:
     CRegret_theory_T_list = []
     if run_mode == "full":
         T_list = np.array([3000, 10000, 30000, 100000, 300000, 1000000, 3000000, 10000000])
+        #T_list = np.array([3000, 10000, 30000, 100000, 300000, 1000000])
     elif run_mode == "debug":
         T_list = np.array([300, 1000])
     else:
